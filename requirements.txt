@@ -1,0 +1,13 @@
+Django>=5.2.8,<6.0
+djangorestframework==3.15.2
+djangorestframework-simplejwt==5.4.0
+django-cors-headers==4.6.0
+django-filter==24.3
+python-decouple==3.8
+google-genai
+Pillow
+gunicorn==23.0.0
+
+# Only needed if you switch USE_SQLITE=False in .env to use real PostgreSQL.
+# Uncomment once PostgreSQL is installed on your machine (needs pg_config on PATH).
+# psycopg2-binary==2.9.10
