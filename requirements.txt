@@ -7,7 +7,9 @@ python-decouple==3.8
 google-genai
 Pillow
 gunicorn==23.0.0
+dj-database-url==2.3.0
+whitenoise==6.8.2
 
 # Only needed if you switch USE_SQLITE=False in .env to use real PostgreSQL.
 # Uncomment once PostgreSQL is installed on your machine (needs pg_config on PATH).
-# psycopg2-binary==2.9.10
+psycopg2-binary==2.9.10

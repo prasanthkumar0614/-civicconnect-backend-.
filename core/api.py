@@ -72,11 +72,24 @@ class AreaViewSet(viewsets.ModelViewSet):
     serializer_class = AreaSerializer
     permission_classes = [ReadOnlyOrAdmin]
     filterset_fields = ["level", "parent"]
-
+    
     @action(detail=False, methods=["get"])
     def tree(self, request):
-        roots = self.get_queryset().filter(parent__isnull=True).order_by("name")
-        return Response(AreaTreeSerializer(roots, many=True).data)
+        all_areas = list(self.get_queryset().order_by("id"))
+        children_map = {}
+        for area in all_areas:
+            children_map.setdefault(area.parent_id, []).append(area)
+
+        def build(area):
+            return {
+                "id": area.id,
+                "name": area.name,
+                "level": area.level,
+                "children": [build(child) for child in children_map.get(area.id, [])],
+            }
+
+        roots = children_map.get(None, [])
+        return Response([build(r) for r in roots])
 
 
 class DepartmentViewSet(viewsets.ModelViewSet):

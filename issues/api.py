@@ -43,6 +43,7 @@ class IssueSerializer(serializers.ModelSerializer):
     """Full read representation shown to citizens (their own issues) and authorities."""
 
     asset_display = serializers.CharField(source="asset.asset_id", read_only=True)
+    asset_area_path = serializers.CharField(source="asset.area.full_path", read_only=True)
     reporter_name = serializers.CharField(source="reporter.username", read_only=True)
     assigned_officer_name = serializers.CharField(
         source="assigned_officer.username", read_only=True, default=None
@@ -53,7 +54,7 @@ class IssueSerializer(serializers.ModelSerializer):
     class Meta:
         model = Issue
         fields = [
-            "id", "asset", "asset_display", "reporter", "reporter_name", "description",
+            "id", "asset", "asset_display", "asset_area_path", "reporter", "reporter_name", "description",
             "ai_category", "ai_priority", "ai_summary", "ai_department_suggestion",
             "duplicate_of", "status", "assigned_officer", "assigned_officer_name",
             "resolution_notes", "photos", "status_history", "created_at", "updated_at",
@@ -99,6 +100,9 @@ class NotificationSerializer(serializers.ModelSerializer):
 # ---------------------------------------------------------------------------
 # issues/views.py
 # ---------------------------------------------------------------------------
+import threading
+
+from django.db import close_old_connections
 from django.db.models import Q
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -113,6 +117,19 @@ from services.notification_service import (
     notify_issue_submitted, notify_new_complaint, notify_status_changed,
     notify_officer_assigned, notify_department_high_priority,
 )
+
+
+def _send_submission_notifications_in_background(issue):
+    """
+    Runs in a separate thread, AFTER the citizen already has their success
+    response. Emails are slow and the citizen doesn't need to wait for them —
+    this is what was previously causing intermittent "Couldn't submit your
+    report" errors when the total request time ran too long.
+    """
+    close_old_connections()  # this thread needs its own fresh DB connection
+    notify_issue_submitted(issue)
+    notify_new_complaint(issue)
+    notify_department_high_priority(issue)  # no-op unless ai_priority == HIGH
 
 
 class IssueViewSet(viewsets.ModelViewSet):
@@ -184,9 +201,23 @@ class IssueViewSet(viewsets.ModelViewSet):
             issue.duplicate_of_id = dup_ids[0]
 
         issue.save()
-        notify_issue_submitted(issue)
-        notify_new_complaint(issue)
-        notify_department_high_priority(issue)  # no-op unless ai_priority == HIGH
+
+        # Automatic acknowledgment — appears immediately in the citizen's
+        # "Update from the department" card, no officer action needed.
+        IssueStatusHistory.objects.create(
+            issue=issue,
+            status=issue.status,
+            changed_by=None,
+            note="Thanks for reporting! We've received your complaint and will work to resolve it within 2 working days.",
+        )
+
+        # Emails happen in the background so the citizen's app gets its
+        # "success" response immediately, instead of waiting on 1-3 emails.
+        threading.Thread(
+            target=_send_submission_notifications_in_background,
+            args=(issue,),
+            daemon=True,
+        ).start()
 
     @action(detail=True, methods=["post"], permission_classes=[IsOfficerOrAbove])
     def assign(self, request, pk=None):

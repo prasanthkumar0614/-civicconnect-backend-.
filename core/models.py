@@ -41,6 +41,16 @@ class Area(models.Model):
             frontier = new_ids
         return ids
 
+    def full_path(self):
+        """Returns 'Prakasam > Darsi > Naynapalli' style breadcrumb —
+        walks up the parent chain and joins the names together."""
+        parts = [self.name]
+        node = self.parent
+        while node:
+            parts.append(node.name)
+            node = node.parent
+        return " > ".join(reversed(parts))
+
 
 class Department(models.Model):
     name = models.CharField(max_length=100, unique=True)  # Electricity, Water, Roads, Sanitation...
