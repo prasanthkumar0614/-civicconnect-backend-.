@@ -7,7 +7,8 @@ the issues app so the AI provider can be swapped without touching business logic
 Usage:
     from services.ai_service import classify_issue
     result = classify_issue(description="Light has been off for 3 nights",
-                             asset_type="Street Light", area_name="Naynapalli")
+                             asset_type="Street Light", area_name="Naynapalli",
+                             department_names=["Electricity", "Water Supply"])
 """
 
 import json
@@ -36,15 +37,30 @@ def _get_client():
     return _client
 
 
-_SYSTEM_PROMPT = """You are the triage assistant for a civic issue reporting platform.
+class AIServiceError(Exception):
+    """Raised when the AI call fails or returns an unparseable response."""
+
+
+def classify_issue(description: str, asset_type: str, area_name: str, department_names=None) -> dict:
+    """
+    Calls the LLM to classify a complaint.
+    Returns a dict with keys: category, priority, summary, department.
+    Raises AIServiceError on failure — callers should catch this and still
+    save the issue with status OPEN and empty AI fields, so a flaky AI call
+    never blocks complaint submission (see issues/views.py perform_create).
+    """
+    department_names = department_names or []
+
+    system_prompt = f"""You are the triage assistant for a civic issue reporting platform.
 Given a citizen's complaint about a public asset, respond with ONLY a JSON object
 (no markdown, no preamble) with these exact keys:
 
-{
+{{
   "category": "<short category name, e.g. 'Street Light Outage'>",
   "priority": "<LOW | MEDIUM | HIGH>",
-  "summary": "<one-sentence neutral summary of the complaint, under 20 words>"
-}
+  "summary": "<one-sentence neutral summary of the complaint, under 20 words>",
+  "department": "<the single best matching name from this list: {department_names}, or empty string if none fit>"
+}}
 
 Priority guidance:
 - HIGH: safety risk (exposed wiring, traffic signal down, water contamination)
@@ -52,19 +68,6 @@ Priority guidance:
 - LOW: cosmetic or minor issue
 """
 
-
-class AIServiceError(Exception):
-    """Raised when the AI call fails or returns an unparseable response."""
-
-
-def classify_issue(description: str, asset_type: str, area_name: str) -> dict:
-    """
-    Calls the LLM to classify a complaint.
-    Returns a dict with keys: category, priority, summary.
-    Raises AIServiceError on failure — callers should catch this and still
-    save the issue with status OPEN and empty AI fields, so a flaky AI call
-    never blocks complaint submission (see issues/api.py perform_create).
-    """
     user_message = (
         f"Asset type: {asset_type}\n"
         f"Area: {area_name}\n"
@@ -75,7 +78,7 @@ def classify_issue(description: str, asset_type: str, area_name: str) -> dict:
         response = _get_client().models.generate_content(
             model="gemini-2.5-flash",
             contents=user_message,
-            config={"system_instruction": _SYSTEM_PROMPT},
+            config={"system_instruction": system_prompt},
         )
         raw_text = response.text.strip()
         raw_text = raw_text.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
@@ -83,6 +86,9 @@ def classify_issue(description: str, asset_type: str, area_name: str) -> dict:
 
         if result.get("priority") not in ("LOW", "MEDIUM", "HIGH"):
             result["priority"] = "MEDIUM"  # safe fallback
+
+        if "department" not in result:
+            result["department"] = ""
 
         return result
 
