@@ -43,6 +43,7 @@ class IssueSerializer(serializers.ModelSerializer):
     """Full read representation shown to citizens (their own issues) and authorities."""
 
     asset_display = serializers.CharField(source="asset.asset_id", read_only=True)
+    asset_area_path = serializers.CharField(source="asset.area.full_path", read_only=True)
     reporter_name = serializers.CharField(source="reporter.username", read_only=True)
     assigned_officer_name = serializers.CharField(
         source="assigned_officer.username", read_only=True, default=None
@@ -53,10 +54,14 @@ class IssueSerializer(serializers.ModelSerializer):
     class Meta:
         model = Issue
         fields = [
-            "id", "asset", "asset_display", "reporter", "reporter_name", "description",
+            "id", "asset", "asset_display", "asset_area_path", "reporter", "reporter_name", "description",
             "ai_category", "ai_priority", "ai_summary", "ai_department_suggestion",
             "duplicate_of", "status", "assigned_officer", "assigned_officer_name",
             "resolution_notes", "photos", "status_history", "created_at", "updated_at",
+        ]
+        read_only_fields = [
+            "reporter", "ai_category", "ai_priority", "ai_summary",
+            "ai_department_suggestion", "duplicate_of", "created_at", "updated_at",
         ]
         read_only_fields = [
             "reporter", "ai_category", "ai_priority", "ai_summary",
