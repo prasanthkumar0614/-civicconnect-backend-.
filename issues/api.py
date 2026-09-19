@@ -100,6 +100,9 @@ class NotificationSerializer(serializers.ModelSerializer):
 # ---------------------------------------------------------------------------
 # issues/views.py
 # ---------------------------------------------------------------------------
+import threading
+
+from django.db import close_old_connections
 from django.db.models import Q
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -114,6 +117,19 @@ from services.notification_service import (
     notify_issue_submitted, notify_new_complaint, notify_status_changed,
     notify_officer_assigned, notify_department_high_priority,
 )
+
+
+def _send_submission_notifications_in_background(issue):
+    """
+    Runs in a separate thread, AFTER the citizen already has their success
+    response. Emails are slow and the citizen doesn't need to wait for them —
+    this is what was previously causing intermittent "Couldn't submit your
+    report" errors when the total request time ran too long.
+    """
+    close_old_connections()  # this thread needs its own fresh DB connection
+    notify_issue_submitted(issue)
+    notify_new_complaint(issue)
+    notify_department_high_priority(issue)  # no-op unless ai_priority == HIGH
 
 
 class IssueViewSet(viewsets.ModelViewSet):
@@ -195,9 +211,13 @@ class IssueViewSet(viewsets.ModelViewSet):
             note="Thanks for reporting! We've received your complaint and will work to resolve it within 2 working days.",
         )
 
-        notify_issue_submitted(issue)
-        notify_new_complaint(issue)
-        notify_department_high_priority(issue)  # no-op unless ai_priority == HIGH
+        # Emails happen in the background so the citizen's app gets its
+        # "success" response immediately, instead of waiting on 1-3 emails.
+        threading.Thread(
+            target=_send_submission_notifications_in_background,
+            args=(issue,),
+            daemon=True,
+        ).start()
 
     @action(detail=True, methods=["post"], permission_classes=[IsOfficerOrAbove])
     def assign(self, request, pk=None):
