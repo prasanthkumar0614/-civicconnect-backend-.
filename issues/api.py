@@ -63,10 +63,6 @@ class IssueSerializer(serializers.ModelSerializer):
             "reporter", "ai_category", "ai_priority", "ai_summary",
             "ai_department_suggestion", "duplicate_of", "created_at", "updated_at",
         ]
-        read_only_fields = [
-            "reporter", "ai_category", "ai_priority", "ai_summary",
-            "ai_department_suggestion", "duplicate_of", "created_at", "updated_at",
-        ]
 
 
 class IssueStatusUpdateSerializer(serializers.Serializer):
@@ -189,6 +185,16 @@ class IssueViewSet(viewsets.ModelViewSet):
             issue.duplicate_of_id = dup_ids[0]
 
         issue.save()
+
+        # Automatic acknowledgment — appears immediately in the citizen's
+        # "Update from the department" card, no officer action needed.
+        IssueStatusHistory.objects.create(
+            issue=issue,
+            status=issue.status,
+            changed_by=None,
+            note="Thanks for reporting! We've received your complaint and will work to resolve it within 2 working days.",
+        )
+
         notify_issue_submitted(issue)
         notify_new_complaint(issue)
         notify_department_high_priority(issue)  # no-op unless ai_priority == HIGH
