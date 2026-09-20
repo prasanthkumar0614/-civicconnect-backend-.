@@ -75,7 +75,7 @@ class AreaViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=["get"])
     def tree(self, request):
-        all_areas = list(self.get_queryset().order_by("id"))
+        all_areas = list(self.get_queryset().order_by("name"))
         children_map = {}
         for area in all_areas:
             children_map.setdefault(area.parent_id, []).append(area)
