@@ -88,4 +88,8 @@ class Command(BaseCommand):
             f"\nFilled {len(empty_mandals)} previously-empty mandals.\n"
             f"Created {len(village_objs)} villages, {len(ward_objs)} wards, "
             f"{len(asset_objs)} assets."
+<<<<<<< HEAD
         ))
+=======
+        ))
+>>>>>>> 2a5121e261c8251c60ec81fc06dbec500fbb602a
