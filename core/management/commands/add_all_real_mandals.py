@@ -7,21 +7,14 @@ official district reorganization notifications (compiled via Wikipedia's
 notifications and the state's 2022-23 Socio Economic Survey).
 
 Covers 28 districts total — note AP has been 28 districts since Dec 2025,
-not 26: Polavaram and Markapuram were newly carved out. If your database
-still only has 26 districts, run your existing district-adding command
-first (or add these two manually) before running this one.
+not 26: Polavaram and Markapuram were newly carved out. This command will
+CREATE these 2 as new districts automatically if they're missing.
 
 This command is ADDITIVE and SAFE to re-run: it uses get_or_create, so it
 never duplicates a mandal that's already there. It does NOT delete any
 existing placeholder mandals (e.g. "Mandal 1", "Mandal 2") — if you want
 those removed, run with --replace to delete a district's existing mandals
 before adding the real ones.
-
-Because your database's district names may not exactly match the official
-names below (e.g. you may have stored "Nellore" instead of "Sri Potti Sri
-Ramulu Nellore"), each entry lists common aliases — the command tries each
-one and reports any district it couldn't match, so you can tell me the
-exact name and I'll add it.
 
 Usage:
     python manage.py add_all_real_mandals            # add-only, safe
@@ -32,9 +25,6 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from core.models import Area
 
-# district_aliases: the names we'll TRY to match against your existing
-# DISTRICT-level Area rows (case-insensitive). List your actual stored
-# name first if you know it, but all common variants are included.
 DISTRICT_DATA = [
     {
         "aliases": ["Alluri Sitharama Raju", "Alluri Seetarama Raju", "Alluri Seetharama Raju", "ASR"],
@@ -50,7 +40,7 @@ DISTRICT_DATA = [
                     "Nathavaram", "Ravikamatham", "Rolugunta"],
     },
     {
-        "aliases": ["Anantapuramu", "Anantapur"],
+        "aliases": ["Ananthapuramu", "Anantapuramu", "Anantapur"],
         "mandals": ["Anantapuramu", "Atmakur", "Bukkaraya Samudram", "Garladinne", "Kudair",
                     "Narpala", "Peddapappur", "Putlur", "Raptadu", "Singanamala", "Tadipatri",
                     "Yellanur", "Gooty", "Guntakal", "Pamidi", "Peddavadugur", "Uravakonda",
@@ -136,7 +126,7 @@ DISTRICT_DATA = [
                     "Maddikera East", "Pattikonda", "Tuggali"],
     },
     {
-        "aliases": ["Markapuram"],  # new district, split from Prakasam (Dec 2025)
+        "aliases": ["Markapuram"], "create_if_missing": True,  # new district, split from Prakasam (Dec 2025)
         "mandals": ["Chandra Sekhara Puram", "Hanumanthuni Padu", "Kanigiri", "Pamur",
                     "Pedacherlo Palle", "Veligandla", "Ardhaveedu", "Bestawaripeta", "Cumbum",
                     "Dornala", "Giddalur", "Konakanamitla", "Komarolu", "Markapuram",
@@ -176,7 +166,7 @@ DISTRICT_DATA = [
                     "Makkuva", "Pachipenta", "Parvathipuram", "Salur", "Seethanagaram"],
     },
     {
-        "aliases": ["Polavaram"],  # new district, split from ASR/East Godavari (Dec 2025)
+        "aliases": ["Polavaram"], "create_if_missing": True,  # new district, split from ASR/East Godavari (Dec 2025)
         "mandals": ["Chintur", "Etapaka", "Kunavaram", "Vararamachandrapuram", "Addateegala",
                     "Devipatnam", "Gangavaram", "Gurthedu", "Maredumilli", "Rajavommangi",
                     "Rampachodavaram", "Y. Ramavaram"],
@@ -192,7 +182,7 @@ DISTRICT_DATA = [
                     "Zarugumilli"],
     },
     {
-        "aliases": ["Sri Potti Sri Ramulu Nellore", "Nellore", "SPSR Nellore"],
+        "aliases": ["Sri Potti Sriramulu Nellore", "Sri Potti Sri Ramulu Nellore", "Nellore", "SPSR Nellore"],
         "mandals": ["Ananthasagaram", "Anumasamudrampeta", "Atmakur", "Chejerla", "Kaluvoya",
                     "Marripadu", "Sangam", "Sitarampuramu", "Udayagiri", "Gudur", "Chillakur",
                     "Kota", "Allur", "Bogolu", "Dagadarthi", "Duttaluru", "Jaladanki", "Kaligiri",
@@ -293,8 +283,14 @@ class Command(BaseCommand):
                     break
 
             if not district:
-                unmatched.append(entry["aliases"][0])
-                continue
+                if entry.get("create_if_missing"):
+                    district = Area.objects.create(
+                        name=entry["aliases"][0], level=Area.Level.DISTRICT, parent=None,
+                    )
+                    self.stdout.write(self.style.SUCCESS(f"  Created new district: {district.name}"))
+                else:
+                    unmatched.append(entry["aliases"][0])
+                    continue
 
             matched_count += 1
 
