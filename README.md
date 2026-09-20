@@ -39,7 +39,7 @@ See `.env.example` for required environment variables.
 
 ## Project Structure
 
-
 ## Author
+
 **Sodima Naga Prasanth Kumar**
 B.Tech Electronics & Communication Engineering, Pace Institute of Technology and Sciences, Ongole
