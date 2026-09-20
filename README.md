@@ -1,44 +1,45 @@
-# CivicConnect Backend — Ready to Run
+# CivicConnect — Backend API
 
-This is the complete, assembled backend: Django project scaffold + your
-original app files (api.py, permissions.py, services) + models split into
-each app + a working requirements.txt + SQLite-by-default settings.
+The backend for **CivicConnect**, an AI-powered civic issue reporting and management platform for Andhra Pradesh. Citizens report problems with public infrastructure (street lights, transformers, water pumps, etc.) tied to a structured Asset ID system, and the platform routes, classifies, and tracks each complaint through resolution.
 
-## First-time setup
+🔗 **Live API:** https://civicconnect-p3mq.onrender.com
+🔗 **Dashboard:** https://civicconnect-dashboard.vercel.app
 
-Open a terminal in this folder (the one with `manage.py` in it), then:
+## Features
 
-```
-python -m venv venv
-venv\Scripts\activate
+- **Role-based access control** — Citizen, Officer, Department Admin, Mandal Head, and Super Admin roles, each scoped to exactly the data they should see
+- **AI-powered triage** — every complaint is automatically classified by category, priority, and department using Google's Gemini API, with graceful fallback if the AI call fails
+- **Duplicate detection** — flags likely-duplicate complaints on the same asset
+- **Asset clustering** — detects nearby faulty assets reported around the same time, surfacing possible shared faults (e.g. a transformer issue knocking out several street lights)
+- **Real government data** — all 28 official Andhra Pradesh districts and 683+ real mandal names, sourced from official reorganization notifications
+- **Email notifications** — automatic status updates to citizens, officer assignment alerts, and high-priority escalations to department admins
+- **Photo & video evidence** — citizens and officers can attach media to complaints
+
+## Tech Stack
+
+- **Framework:** Django + Django REST Framework
+- **Database:** PostgreSQL
+- **Auth:** JWT (djangorestframework-simplejwt)
+- **AI:** Google Gemini API
+- **Static files:** WhiteNoise
+- **Deployment:** Render
+
+## Local Setup
+
+```bash
 pip install -r requirements.txt
-python manage.py makemigrations accounts core assets issues
 python manage.py migrate
+python manage.py add_all_real_mandals
+python manage.py fill_empty_mandals
 python manage.py createsuperuser
 python manage.py runserver
 ```
 
-Visit http://127.0.0.1:8000/admin/ and log in with the superuser you just
-created to confirm it's working.
+See `.env.example` for required environment variables.
 
-## Notes
+## Project Structure
 
-- **Database**: runs on SQLite by default (`USE_SQLITE=True` in `.env`) —
-  no PostgreSQL install needed. To switch to PostgreSQL later: install
-  PostgreSQL, uncomment `psycopg2-binary` in `requirements.txt`, run
-  `pip install -r requirements.txt` again, set `USE_SQLITE=False` and fill in
-  `DB_NAME`/`DB_USER`/`DB_PASSWORD` in `.env`.
-- **AI classification**: works without any key — issues just save without
-  AI fields filled in if `ANTHROPIC_API_KEY` is blank in `.env`. Add a real
-  key there to turn on real classification via the Claude API.
-- **Auth**: JWT-based (`djangorestframework-simplejwt`). Get a token at
-  `POST /api/auth/token/` with `username`/`password`.
-- **Frontend CORS**: `.env`'s `CORS_ALLOWED_ORIGINS` already allows
-  `localhost:5173` and `localhost:5174` — the two React dev server ports.
 
-## If `pip install` fails on a package
-
-Your Python version matters here. If you're on a very new Python (3.14+),
-some packages may not have prebuilt wheels yet. If a specific package fails
-to build, tell me the exact error and I'll swap in a version that has a
-compatible wheel.
+## Author
+**Sodima Naga Prasanth Kumar**
+B.Tech Electronics & Communication Engineering, Pace Institute of Technology and Sciences, Ongole
