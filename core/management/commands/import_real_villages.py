@@ -80,7 +80,7 @@ class Command(BaseCommand):
         with open(csv_path, encoding="utf-8-sig", newline="") as f:
     reader = csv.reader(f)
 
-    # Skip the CSV header
+    # Skip the CSV header row
     header = next(reader, None)
 
     for row in reader:
@@ -96,13 +96,13 @@ class Command(BaseCommand):
         if not district_name or not mandal_name or not village_name:
             continue
 
-                district = district_by_norm.get(normalize(district_name))
-                if not district:
-                    unmatched_districts.add(district_name)
-                    continue
+        district = district_by_norm.get(normalize(district_name))
+        if not district:
+            unmatched_districts.add(district_name)
+            continue
 
-                key = (district.id, mandal_name.strip())
-                rows_by_mandal.setdefault(key, []).append(village_name.strip())
+        key = (district.id, mandal_name)
+        rows_by_mandal.setdefault(key, []).append(village_name)
 
         self.stdout.write(f"Parsed CSV. Found {len(rows_by_mandal)} distinct (district, mandal) groups.")
         if unmatched_districts:
