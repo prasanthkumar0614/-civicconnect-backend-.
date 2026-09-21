@@ -1,19 +1,6 @@
-"""
-Import real Andhra Pradesh villages from the LGD CSV.
-
-CSV location:
-    core/data/andhra_pradesh_villages.csv
-
-LGD attribution:
-    Local Government Directory (LGD)
-    Ministry of Panchayati Raj
-    Government of India
-    Used under GODL-India.
-"""
-
 import csv
-import os
 import re
+from pathlib import Path
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
@@ -21,292 +8,246 @@ from django.db import transaction
 from core.models import Area
 
 
-DEFAULT_CSV_PATH = os.path.join(
-    "core",
-    "data",
-    "andhra_pradesh_villages.csv",
+CSV_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "data"
+    / "andhra_pradesh_villages.csv"
 )
 
 
-def normalize(name):
-    """Normalize names for matching."""
-    name = str(name or "").replace(".", "")
-    name = re.sub(r"\s+", " ", name)
-    return name.strip().lower()
+def normalize(value):
+    """
+    Makes names comparable even when punctuation, dots,
+    extra spaces, hyphens, etc. differ.
+
+    Example:
+        Dr. B. R. Ambedkar Konaseema
+        Dr. B.R. Ambedkar Konaseema
+
+    become the same key.
+    """
+    value = str(value or "").strip().casefold()
+    value = re.sub(r"[^a-z0-9]+", "", value)
+    return value
 
 
 class Command(BaseCommand):
-    help = "Import real Andhra Pradesh villages from the LGD CSV."
+    help = "Import all real Andhra Pradesh villages/areas from the LGD CSV."
 
-    def add_arguments(self, parser):
-        parser.add_argument(
-            "--csv",
-            type=str,
-            default=DEFAULT_CSV_PATH,
-        )
-
+    @transaction.atomic
     def handle(self, *args, **options):
-        csv_path = options["csv"]
 
-        if not os.path.exists(csv_path):
-            self.stdout.write(
-                self.style.ERROR(
-                    f"CSV not found: {csv_path}"
-                )
+        if not CSV_PATH.exists():
+            raise FileNotFoundError(
+                f"CSV file not found: {CSV_PATH}"
             )
-            return
 
-        # ---------------------------------------------------------
-        # Load existing districts
-        # ---------------------------------------------------------
-        districts = list(
-            Area.objects.filter(
-                level=Area.Level.DISTRICT
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"Reading CSV: {CSV_PATH}"
             )
         )
 
-        district_by_norm = {
-            normalize(d.name): d
-            for d in districts
-        }
+        # ---------------------------------------------------------
+        # 1. LOAD ALL DISTRICTS
+        # ---------------------------------------------------------
+        districts = {}
 
-        rows_by_mandal = {}
-        unmatched_districts = set()
-        total_rows = 0
+        for district in Area.objects.filter(
+            level=Area.Level.DISTRICT
+        ):
+            districts[normalize(district.name)] = district
+
+        self.stdout.write(
+            f"Database districts found: {len(districts)}"
+        )
 
         # ---------------------------------------------------------
-        # Read CSV
+        # 2. LOAD ALL EXISTING MANDALS
         # ---------------------------------------------------------
-        with open(
-            csv_path,
-            "r",
-            encoding="utf-8-sig",
-            newline="",
-        ) as f:
+        mandals = {}
 
-            reader = csv.reader(f)
+        for mandal in Area.objects.filter(
+            level=Area.Level.MANDAL
+        ).select_related("parent"):
 
-            # Your CSV has a header row.
-            header = next(reader, None)
-
-            self.stdout.write(
-                f"CSV header detected: {header}"
-            )
-
-            for row in reader:
-                total_rows += 1
-
-                if len(row) < 6:
-                    continue
-
-                # Columns:
-                # 0 State
-                # 1 District
-                # 2 District Code
-                # 3 Mandal
-                # 4 Mandal Code
-                # 5 Village
-                district_name = row[1].strip()
-                mandal_name = row[3].strip()
-                village_name = row[5].strip()
-
-                if (
-                    not district_name
-                    or not mandal_name
-                    or not village_name
-                ):
-                    continue
-
-                district = district_by_norm.get(
-                    normalize(district_name)
-                )
-
-                if not district:
-                    unmatched_districts.add(
-                        district_name
-                    )
-                    continue
-
+            if mandal.parent_id:
                 key = (
-                    district.id,
-                    normalize(mandal_name),
-                )
-
-                if key not in rows_by_mandal:
-                    rows_by_mandal[key] = {
-                        "district": district,
-                        "mandal_name": mandal_name,
-                        "villages": [],
-                    }
-
-                rows_by_mandal[key]["villages"].append(
-                    village_name
-                )
-
-        self.stdout.write(
-            f"Parsed {total_rows} CSV rows."
-        )
-
-        self.stdout.write(
-            f"Found {len(rows_by_mandal)} "
-            f"district/mandal groups."
-        )
-
-        if unmatched_districts:
-            self.stdout.write(
-                self.style.WARNING(
-                    "Unmatched districts: "
-                    + ", ".join(
-                        sorted(unmatched_districts)
-                    )
-                )
-            )
-
-        # ---------------------------------------------------------
-        # Load existing mandals
-        # ---------------------------------------------------------
-        district_ids = [
-            district.id
-            for district in districts
-        ]
-
-        mandal_cache = {}
-
-        existing_mandals = Area.objects.filter(
-            level=Area.Level.MANDAL,
-            parent_id__in=district_ids,
-        )
-
-        for mandal in existing_mandals:
-            mandal_cache[
-                (
                     mandal.parent_id,
                     normalize(mandal.name),
                 )
-            ] = mandal
-
-        # ---------------------------------------------------------
-        # Create missing mandals
-        # ---------------------------------------------------------
-        new_mandals = []
-
-        for key, data in rows_by_mandal.items():
-
-            if key not in mandal_cache:
-                new_mandal = Area(
-                    name=data["mandal_name"],
-                    level=Area.Level.MANDAL,
-                    parent_id=data["district"].id,
-                )
-
-                new_mandals.append(new_mandal)
-                mandal_cache[key] = new_mandal
-
-        if new_mandals:
-            with transaction.atomic():
-                Area.objects.bulk_create(
-                    new_mandals,
-                    batch_size=500,
-                )
-
-            # Refresh cache because bulk-created objects
-            # now have database IDs.
-            existing_mandals = Area.objects.filter(
-                level=Area.Level.MANDAL,
-                parent_id__in=district_ids,
-            )
-
-            mandal_cache = {
-                (
-                    m.parent_id,
-                    normalize(m.name),
-                ): m
-                for m in existing_mandals
-            }
+                mandals[key] = mandal
 
         self.stdout.write(
-            f"Mandals ready: "
-            f"{len(mandal_cache)}"
+            f"Database mandals found: {len(mandals)}"
         )
 
         # ---------------------------------------------------------
-        # Load existing villages
+        # 3. READ CSV
         # ---------------------------------------------------------
-        existing_village_keys = set(
-            Area.objects.filter(
-                level=Area.Level.VILLAGE
-            ).values_list(
-                "parent_id",
-                "name",
+        rows = []
+
+        with CSV_PATH.open(
+            "r",
+            encoding="utf-8-sig",
+            newline="",
+        ) as csv_file:
+
+            reader = csv.DictReader(csv_file)
+
+            self.stdout.write(
+                f"CSV columns: {reader.fieldnames}"
             )
-        )
 
-        # ---------------------------------------------------------
-        # Prepare villages
-        # ---------------------------------------------------------
-        village_objects = []
+            for row in reader:
 
-        for key, data in rows_by_mandal.items():
+                district_name = (
+                    row.get("District") or ""
+                ).strip()
 
-            mandal = mandal_cache.get(key)
+                mandal_name = (
+                    row.get("Mandal") or ""
+                ).strip()
 
-            if not mandal or not mandal.id:
-                continue
+                village_name = (
+                    row.get("Village") or ""
+                ).strip()
 
-            for village_name in data["villages"]:
-
-                village_key = (
-                    mandal.id,
-                    village_name,
-                )
-
-                if village_key in existing_village_keys:
+                if not district_name:
                     continue
 
-                village_objects.append(
-                    Area(
-                        name=village_name,
-                        level=Area.Level.VILLAGE,
-                        parent_id=mandal.id,
+                if not mandal_name:
+                    continue
+
+                if not village_name:
+                    continue
+
+                rows.append(
+                    (
+                        district_name,
+                        mandal_name,
+                        village_name,
                     )
                 )
 
-                existing_village_keys.add(
-                    village_key
-                )
-
-        # ---------------------------------------------------------
-        # Insert villages
-        # ---------------------------------------------------------
-        created_count = 0
-
-        if village_objects:
-            with transaction.atomic():
-                Area.objects.bulk_create(
-                    village_objects,
-                    batch_size=1000,
-                    ignore_conflicts=True,
-                )
-
-            created_count = len(village_objects)
-
-        # ---------------------------------------------------------
-        # Final result
-        # ---------------------------------------------------------
         self.stdout.write(
             self.style.SUCCESS(
-                "\n========================================\n"
-                "REAL VILLAGE IMPORT COMPLETE\n"
-                "========================================\n"
-                f"CSV rows read: {total_rows}\n"
-                f"District/mandal groups: {len(rows_by_mandal)}\n"
-                f"Mandals available: {len(mandal_cache)}\n"
-                f"Real villages created: {created_count}\n"
-                "========================================\n"
-                "Data source: Local Government Directory "
-                "(LGD), Ministry of Panchayati Raj, "
-                "Government of India.\n"
-                "Used under GODL-India.\n"
-                "========================================"
+                f"CSV rows read: {len(rows)}"
             )
         )
+
+        # ---------------------------------------------------------
+        # 4. IMPORT
+        # ---------------------------------------------------------
+        villages_created = 0
+        villages_existing = 0
+        mandals_created = 0
+
+        unmatched_districts = set()
+        unmatched_mandals = set()
+
+        for district_name, mandal_name, village_name in rows:
+
+            # -----------------------------------------------------
+            # FIND DISTRICT
+            # -----------------------------------------------------
+            district = districts.get(
+                normalize(district_name)
+            )
+
+            if not district:
+                unmatched_districts.add(
+                    district_name
+                )
+                continue
+
+            # -----------------------------------------------------
+            # FIND / CREATE MANDAL
+            # -----------------------------------------------------
+            mandal_key = (
+                district.id,
+                normalize(mandal_name),
+            )
+
+            mandal = mandals.get(mandal_key)
+
+            if not mandal:
+
+                mandal = Area.objects.create(
+                    name=mandal_name,
+                    level=Area.Level.MANDAL,
+                    parent=district,
+                )
+
+                mandals[mandal_key] = mandal
+                mandals_created += 1
+
+            # -----------------------------------------------------
+            # FIND / CREATE VILLAGE
+            # -----------------------------------------------------
+            village, created = Area.objects.get_or_create(
+                name=village_name,
+                level=Area.Level.VILLAGE,
+                parent=mandal,
+            )
+
+            if created:
+                villages_created += 1
+            else:
+                villages_existing += 1
+
+        # ---------------------------------------------------------
+        # 5. FINAL REPORT
+        # ---------------------------------------------------------
+        self.stdout.write("")
+        self.stdout.write("=" * 60)
+        self.stdout.write(
+            self.style.SUCCESS(
+                "REAL VILLAGE IMPORT COMPLETE"
+            )
+        )
+        self.stdout.write("=" * 60)
+
+        self.stdout.write(
+            f"CSV rows read:          {len(rows)}"
+        )
+
+        self.stdout.write(
+            f"New mandals created:    {mandals_created}"
+        )
+
+        self.stdout.write(
+            f"New villages created:   {villages_created}"
+        )
+
+        self.stdout.write(
+            f"Villages already exist: {villages_existing}"
+        )
+
+        self.stdout.write(
+            f"Total villages now:     "
+            f"{Area.objects.filter(level=Area.Level.VILLAGE).count()}"
+        )
+
+        if unmatched_districts:
+            self.stdout.write("")
+            self.stdout.write(
+                self.style.WARNING(
+                    "UNMATCHED DISTRICTS:"
+                )
+            )
+
+            for name in sorted(unmatched_districts):
+                self.stdout.write(
+                    f"  - {name}"
+                )
+
+        self.stdout.write("")
+        self.stdout.write(
+            "Data source: Local Government Directory (LGD), "
+            "Ministry of Panchayati Raj, Government of India."
+        )
+        self.stdout.write(
+            "Used under GODL-India."
+        )
+        self.stdout.write("=" * 60)
