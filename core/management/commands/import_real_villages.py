@@ -78,7 +78,7 @@ class Command(BaseCommand):
         unmatched_districts = set()
 
         with open(csv_path, encoding="utf-8-sig", newline="") as f:
-    reader = csv.reader(f)
+            reader = csv.reader(f)
 
     # Skip the CSV header row
     header = next(reader, None)
