@@ -16,40 +16,28 @@ CSV_PATH = (
 
 
 def normalize(value):
-    """
-    Makes names comparable even when punctuation, dots,
-    extra spaces, hyphens, etc. differ.
-
-    Example:
-        Dr. B. R. Ambedkar Konaseema
-        Dr. B.R. Ambedkar Konaseema
-
-    become the same key.
-    """
     value = str(value or "").strip().casefold()
-    value = re.sub(r"[^a-z0-9]+", "", value)
-    return value
+    return re.sub(r"[^a-z0-9]+", "", value)
 
 
 class Command(BaseCommand):
-    help = "Import all real Andhra Pradesh villages/areas from the LGD CSV."
+    help = "Import all real Andhra Pradesh villages from the LGD CSV."
 
-    @transaction.atomic
     def handle(self, *args, **options):
 
         if not CSV_PATH.exists():
             raise FileNotFoundError(
-                f"CSV file not found: {CSV_PATH}"
+                f"CSV not found: {CSV_PATH}"
             )
 
         self.stdout.write(
             self.style.SUCCESS(
-                f"Reading CSV: {CSV_PATH}"
+                f"Reading: {CSV_PATH}"
             )
         )
 
         # ---------------------------------------------------------
-        # 1. LOAD ALL DISTRICTS
+        # DISTRICTS
         # ---------------------------------------------------------
         districts = {}
 
@@ -59,31 +47,31 @@ class Command(BaseCommand):
             districts[normalize(district.name)] = district
 
         self.stdout.write(
-            f"Database districts found: {len(districts)}"
+            f"Districts in database: {len(districts)}"
         )
 
         # ---------------------------------------------------------
-        # 2. LOAD ALL EXISTING MANDALS
+        # MANDALS
         # ---------------------------------------------------------
         mandals = {}
 
         for mandal in Area.objects.filter(
             level=Area.Level.MANDAL
-        ).select_related("parent"):
-
+        ):
             if mandal.parent_id:
-                key = (
-                    mandal.parent_id,
-                    normalize(mandal.name),
-                )
-                mandals[key] = mandal
+                mandals[
+                    (
+                        mandal.parent_id,
+                        normalize(mandal.name),
+                    )
+                ] = mandal
 
         self.stdout.write(
-            f"Database mandals found: {len(mandals)}"
+            f"Mandals in database: {len(mandals)}"
         )
 
         # ---------------------------------------------------------
-        # 3. READ CSV
+        # READ CSV
         # ---------------------------------------------------------
         rows = []
 
@@ -91,9 +79,9 @@ class Command(BaseCommand):
             "r",
             encoding="utf-8-sig",
             newline="",
-        ) as csv_file:
+        ) as f:
 
-            reader = csv.DictReader(csv_file)
+            reader = csv.DictReader(f)
 
             self.stdout.write(
                 f"CSV columns: {reader.fieldnames}"
@@ -137,20 +125,16 @@ class Command(BaseCommand):
         )
 
         # ---------------------------------------------------------
-        # 4. IMPORT
+        # PREPARE VILLAGES
         # ---------------------------------------------------------
-        villages_created = 0
-        villages_existing = 0
-        mandals_created = 0
+        village_objects = []
+        village_keys = set()
 
         unmatched_districts = set()
-        unmatched_mandals = set()
+        missing_mandals = set()
 
         for district_name, mandal_name, village_name in rows:
 
-            # -----------------------------------------------------
-            # FIND DISTRICT
-            # -----------------------------------------------------
             district = districts.get(
                 normalize(district_name)
             )
@@ -161,9 +145,6 @@ class Command(BaseCommand):
                 )
                 continue
 
-            # -----------------------------------------------------
-            # FIND / CREATE MANDAL
-            # -----------------------------------------------------
             mandal_key = (
                 district.id,
                 normalize(mandal_name),
@@ -180,25 +161,121 @@ class Command(BaseCommand):
                 )
 
                 mandals[mandal_key] = mandal
-                mandals_created += 1
 
-            # -----------------------------------------------------
-            # FIND / CREATE VILLAGE
-            # -----------------------------------------------------
-            village, created = Area.objects.get_or_create(
-                name=village_name,
-                level=Area.Level.VILLAGE,
-                parent=mandal,
+                missing_mandals.add(
+                    f"{district.name} > {mandal_name}"
+                )
+
+            village_key = (
+                mandal.id,
+                normalize(village_name),
             )
 
-            if created:
-                villages_created += 1
-            else:
-                villages_existing += 1
+            # Prevent duplicate CSV rows.
+            if village_key in village_keys:
+                continue
+
+            village_keys.add(village_key)
+
+            village_objects.append(
+                Area(
+                    name=village_name,
+                    level=Area.Level.VILLAGE,
+                    parent=mandal,
+                )
+            )
+
+        self.stdout.write(
+            f"Village records prepared: {len(village_objects)}"
+        )
 
         # ---------------------------------------------------------
-        # 5. FINAL REPORT
+        # FIND EXISTING VILLAGES
         # ---------------------------------------------------------
+        existing_keys = set()
+
+        village_parent_ids = {
+            village.parent_id
+            for village in village_objects
+        }
+
+        if village_parent_ids:
+
+            existing_villages = Area.objects.filter(
+                level=Area.Level.VILLAGE,
+                parent_id__in=village_parent_ids,
+            ).values_list(
+                "parent_id",
+                "name",
+            )
+
+            for parent_id, name in existing_villages:
+                existing_keys.add(
+                    (
+                        parent_id,
+                        normalize(name),
+                    )
+                )
+
+        # ---------------------------------------------------------
+        # REMOVE ALREADY EXISTING VILLAGES
+        # ---------------------------------------------------------
+        new_villages = [
+            village
+            for village in village_objects
+            if (
+                village.parent_id,
+                normalize(village.name),
+            ) not in existing_keys
+        ]
+
+        self.stdout.write(
+            f"New villages to insert: {len(new_villages)}"
+        )
+
+        # ---------------------------------------------------------
+        # BULK INSERT
+        # ---------------------------------------------------------
+        created_count = 0
+
+        with transaction.atomic():
+
+            batch_size = 1000
+
+            for start in range(
+                0,
+                len(new_villages),
+                batch_size,
+            ):
+
+                batch = new_villages[
+                    start:start + batch_size
+                ]
+
+                Area.objects.bulk_create(
+                    batch,
+                    batch_size=batch_size,
+                    ignore_conflicts=True,
+                )
+
+                created_count += len(batch)
+
+                self.stdout.write(
+                    f"Inserted {min(start + batch_size, len(new_villages))}"
+                    f"/{len(new_villages)} villages"
+                )
+
+        # ---------------------------------------------------------
+        # FINAL COUNTS
+        # ---------------------------------------------------------
+        total_villages = Area.objects.filter(
+            level=Area.Level.VILLAGE
+        ).count()
+
+        total_mandals = Area.objects.filter(
+            level=Area.Level.MANDAL
+        ).count()
+
         self.stdout.write("")
         self.stdout.write("=" * 60)
         self.stdout.write(
@@ -213,20 +290,19 @@ class Command(BaseCommand):
         )
 
         self.stdout.write(
-            f"New mandals created:    {mandals_created}"
+            f"Village records prepared:{len(village_objects)}"
         )
 
         self.stdout.write(
-            f"New villages created:   {villages_created}"
+            f"New villages inserted:  {created_count}"
         )
 
         self.stdout.write(
-            f"Villages already exist: {villages_existing}"
+            f"Total mandals now:      {total_mandals}"
         )
 
         self.stdout.write(
-            f"Total villages now:     "
-            f"{Area.objects.filter(level=Area.Level.VILLAGE).count()}"
+            f"Total villages now:     {total_villages}"
         )
 
         if unmatched_districts:
@@ -242,9 +318,18 @@ class Command(BaseCommand):
                     f"  - {name}"
                 )
 
+        if missing_mandals:
+            self.stdout.write("")
+            self.stdout.write(
+                self.style.WARNING(
+                    f"Mandals created from CSV: "
+                    f"{len(missing_mandals)}"
+                )
+            )
+
         self.stdout.write("")
         self.stdout.write(
-            "Data source: Local Government Directory (LGD), "
+            "Source: Local Government Directory (LGD), "
             "Ministry of Panchayati Raj, Government of India."
         )
         self.stdout.write(
