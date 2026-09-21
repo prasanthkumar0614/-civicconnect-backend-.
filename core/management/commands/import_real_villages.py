@@ -77,12 +77,24 @@ class Command(BaseCommand):
         rows_by_mandal = {}
         unmatched_districts = set()
 
-        with open(csv_path, encoding="utf-8") as f:
-            reader = csv.reader(f)
-            for row in reader:
-                if len(row) < 6:
-                    continue
-                _, district_name, _, mandal_name, _, village_name = row[:6]
+        with open(csv_path, encoding="utf-8-sig", newline="") as f:
+    reader = csv.reader(f)
+
+    # Skip the CSV header
+    header = next(reader, None)
+
+    for row in reader:
+        if len(row) < 6:
+            continue
+
+        _, district_name, _, mandal_name, _, village_name = row[:6]
+
+        district_name = district_name.strip()
+        mandal_name = mandal_name.strip()
+        village_name = village_name.strip()
+
+        if not district_name or not mandal_name or not village_name:
+            continue
 
                 district = district_by_norm.get(normalize(district_name))
                 if not district:
