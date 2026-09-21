@@ -38,11 +38,26 @@ class Asset(models.Model):
     last_maintained_on = models.DateField(null=True, blank=True)
 
     def save(self, *args, **kwargs):
-        # Auto-generate asset_id from prefix + running number if not supplied.
-        if not self.asset_id:
-            count = Asset.objects.filter(asset_type=self.asset_type).count() + 1
-            self.asset_id = f"{self.asset_type.id_prefix}-{count:03d}"
-        super().save(*args, **kwargs)
+    if not self.asset_id:
+        last_asset = (
+            Asset.objects
+            .filter(asset_type=self.asset_type)
+            .exclude(asset_id__isnull=True)
+            .order_by("-id")
+            .first()
+        )
+
+        if last_asset and last_asset.asset_id:
+            try:
+                last_number = int(last_asset.asset_id.rsplit("-", 1)[1])
+            except (ValueError, IndexError):
+                last_number = 0
+        else:
+            last_number = 0
+
+        self.asset_id = f"{self.asset_type.id_prefix}-{last_number + 1:03d}"
+
+    super().save(*args, **kwargs)
 
     def __str__(self):
         return self.asset_id
