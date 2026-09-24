@@ -1,6 +1,6 @@
 """
-core/serializers.py, core/views.py, core/urls.py (combined here for readability —
-split into three files in the real project).
+core/api.py — serializers, views, and urls for the core app
+(Area hierarchy + Department endpoints).
 """
 
 # ---------------------------------------------------------------------------
@@ -54,6 +54,8 @@ class DepartmentSerializer(serializers.ModelSerializer):
 # core/views.py
 # ---------------------------------------------------------------------------
 from django.db.models import Count, Q
+from django.utils.decorators import method_decorator
+from django.views.decorators.cache import cache_page
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -72,12 +74,6 @@ class AreaViewSet(viewsets.ModelViewSet):
     serializer_class = AreaSerializer
     permission_classes = [ReadOnlyOrAdmin]
     filterset_fields = ["level", "parent"]
-    
-    from django.utils.decorators import method_decorator
-from django.views.decorators.cache import cache_page
-
-class AreaViewSet(viewsets.ModelViewSet):
-    ...
 
     @method_decorator(cache_page(60 * 60 * 6))  # cache for 6 hours
     @action(detail=False, methods=["get"])
