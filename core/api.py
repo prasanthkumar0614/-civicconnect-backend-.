@@ -73,6 +73,13 @@ class AreaViewSet(viewsets.ModelViewSet):
     permission_classes = [ReadOnlyOrAdmin]
     filterset_fields = ["level", "parent"]
     
+    from django.utils.decorators import method_decorator
+from django.views.decorators.cache import cache_page
+
+class AreaViewSet(viewsets.ModelViewSet):
+    ...
+
+    @method_decorator(cache_page(60 * 60 * 6))  # cache for 6 hours
     @action(detail=False, methods=["get"])
     def tree(self, request):
         all_areas = list(self.get_queryset().order_by("name"))
